@@ -23,7 +23,10 @@ func (t *timescaleTarget) TargetName() string {
 }
 
 func (t *timescaleTarget) Serializer() serialize.PointSerializer {
-	return &Serializer{}
+	return &Serializer{
+		tagIdMap: map[string]int{},
+		tagIndex: 1,
+	}
 }
 
 func (t *timescaleTarget) Benchmark(

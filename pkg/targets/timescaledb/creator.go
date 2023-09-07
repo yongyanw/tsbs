@@ -178,6 +178,7 @@ func (d *dbCreator) createTableAndIndexes(dbBench *sql.DB, tableName string, fie
 
 	MustExec(dbBench, fmt.Sprintf("DROP TABLE IF EXISTS %s", tableName))
 	MustExec(dbBench, fmt.Sprintf("CREATE TABLE %s (time timestamptz, tags_id integer, %s, additional_tags JSONB DEFAULT NULL)", tableName, strings.Join(fieldDefs, ",")))
+	/*
 	if d.opts.PartitionIndex {
 		MustExec(dbBench, fmt.Sprintf("CREATE INDEX ON %s(%s, \"time\" DESC)", tableName, partitionColumn))
 	}
@@ -194,6 +195,8 @@ func (d *dbCreator) createTableAndIndexes(dbBench *sql.DB, tableName string, fie
 	for _, indexDef := range indexDefs {
 		MustExec(dbBench, indexDef)
 	}
+	*/
+	d.opts.UseHypertable = false
 
 	if d.opts.UseHypertable {
 		var creationCommand string = "create_hypertable"
@@ -252,14 +255,14 @@ func (d *dbCreator) getCreateIndexOnFieldCmds(hypertable, field, idxType string)
 func createTagsTable(db *sql.DB, tagNames, tagTypes []string, useJSON bool) {
 	MustExec(db, "DROP TABLE IF EXISTS tags")
 	if useJSON {
-		MustExec(db, "CREATE TABLE tags(id SERIAL PRIMARY KEY, tagset JSONB)")
-		MustExec(db, "CREATE UNIQUE INDEX uniq1 ON tags(tagset)")
+		MustExec(db, "CREATE TABLE tags(id int, tagset JSONB)")
+		//MustExec(db, "CREATE UNIQUE INDEX uniq1 ON tags(tagset)")
 		MustExec(db, "CREATE INDEX idxginp ON tags USING gin (tagset jsonb_path_ops);")
 		return
 	}
 
 	MustExec(db, generateTagsTableQuery(tagNames, tagTypes))
-	MustExec(db, fmt.Sprintf("CREATE UNIQUE INDEX uniq1 ON tags(%s)", strings.Join(tagNames, ",")))
+	//MustExec(db, fmt.Sprintf("CREATE UNIQUE INDEX uniq1 ON tags(%s)", strings.Join(tagNames, ",")))
 	MustExec(db, fmt.Sprintf("CREATE INDEX ON tags(%s)", tagNames[0]))
 }
 
@@ -271,7 +274,7 @@ func generateTagsTableQuery(tagNames, tagTypes []string) string {
 	}
 
 	cols := strings.Join(tagColumnDefinitions, ", ")
-	return fmt.Sprintf("CREATE TABLE tags(id SERIAL PRIMARY KEY, %s)", cols)
+	return fmt.Sprintf("CREATE TABLE tags(id int, %s)", cols)
 }
 
 func extractTagNamesAndTypes(tags []string) ([]string, []string) {

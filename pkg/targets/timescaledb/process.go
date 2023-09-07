@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	insertTagsSQL = `INSERT INTO tags(%s) VALUES %s ON CONFLICT DO NOTHING RETURNING *`
+	insertTagsSQL = `INSERT INTO tags(id, %s) VALUES %s ON CONFLICT DO NOTHING RETURNING *`
 	getTagsSQL    = `SELECT * FROM tags`
 	numExtraCols  = 2 // one for json, one for tags_id
 )
@@ -32,7 +32,7 @@ type syncCSI struct {
 }
 
 type insertData struct {
-	tags   string
+	tags string
 	fields string
 }
 
@@ -77,8 +77,8 @@ func (p *processor) insertTags(db *sql.DB, tagRows [][]string) map[string]int64 
 		}
 	} else {
 		for _, val := range tagRows {
-			sqlValues := convertValsToSQLBasedOnType(val[:commonTagsLen], p.opts.TagColumnTypes[:commonTagsLen])
-			row := fmt.Sprintf("(%s)", strings.Join(sqlValues, ","))
+			sqlValues := convertValsToSQLBasedOnType(val[1:commonTagsLen + 1], p.opts.TagColumnTypes[:commonTagsLen])
+			row := fmt.Sprintf("(%s)", val[0] + "," + strings.Join(sqlValues, ","))
 			values = append(values, row)
 		}
 	}
@@ -127,7 +127,7 @@ func (p *processor) sqlTagsToCacheLine(res *sql.Rows, err error, tagCols []strin
 // SQL queries to insert into their respective tables. Additionally, it also
 // returns the number of metrics (i.e., non-tag fields) for the data processed.
 func (p *processor) splitTagsAndMetrics(rows []*insertData, dataCols int) ([][]string, [][]interface{}, uint64) {
-	tagRows := make([][]string, 0, len(rows))
+	var tagRows [][]string
 	dataRows := make([][]interface{}, 0, len(rows))
 	numMetrics := uint64(0)
 	commonTagsLen := len(tableCols[tagsKey])
@@ -137,18 +137,19 @@ func (p *processor) splitTagsAndMetrics(rows []*insertData, dataCols int) ([][]s
 		// for non-common tags that need to be added separately. For each of
 		// the common tags, remove everything before = in the form <label>=<val>
 		// since we won't need it.
-		tags := strings.SplitN(data.tags, ",", commonTagsLen+1)
-		for i := 0; i < commonTagsLen; i++ {
-			tags[i] = strings.Split(tags[i], "=")[1]
-		}
-
-		var json interface{}
-		if len(tags) > commonTagsLen {
-			json = subsystemTagsToJSON(strings.Split(tags[commonTagsLen], ","))
+		if (len(data.tags) > 0) {
+			tr := make([]string, 0, commonTagsLen + 1)
+			tags := strings.SplitN(data.tags, ",", commonTagsLen + 2)
+			for i := 0; i < commonTagsLen + 1; i++ {
+				tr = append(tr, tags[i])
+			}
+			tagRows = append(tagRows, tr)
 		}
 
 		metrics := strings.Split(data.fields, ",")
+		
 		numMetrics += uint64(len(metrics) - 1) // 1 field is timestamp
+		numMetrics -= 1; // tags_id doesn't count
 
 		timeInt, err := strconv.ParseInt(metrics[0], 10, 64)
 		if err != nil {
@@ -156,13 +157,15 @@ func (p *processor) splitTagsAndMetrics(rows []*insertData, dataCols int) ([][]s
 		}
 		ts := time.Unix(0, timeInt)
 
+		tagId, myerr := strconv.ParseInt(metrics[1], 10, 32)
+		if err != nil {
+			panic(myerr)
+		}
+
 		// use nil at 2nd position as placeholder for tagKey
 		r := make([]interface{}, 3, dataCols)
-		r[0], r[1], r[2] = ts, nil, json
-		if p.opts.InTableTag {
-			r = append(r, tags[0])
-		}
-		for _, v := range metrics[1:] {
+		r[0], r[1], r[2] = ts, tagId, metrics[2]
+		for _, v := range metrics[3:] {
 			if v == "" {
 				r = append(r, nil)
 				continue
@@ -177,7 +180,6 @@ func (p *processor) splitTagsAndMetrics(rows []*insertData, dataCols int) ([][]s
 		}
 
 		dataRows = append(dataRows, r)
-		tagRows = append(tagRows, tags[:commonTagsLen])
 	}
 
 	return tagRows, dataRows, numMetrics
@@ -190,6 +192,11 @@ func (p *processor) processCSI(hypertable string, rows []*insertData) uint64 {
 	}
 	tagRows, dataRows, numMetrics := p.splitTagsAndMetrics(rows, colLen)
 
+	if len(tagRows) > 0 {
+		p.insertTags(p._db, tagRows)
+	}
+
+/*
 	// Check if any of these tags has yet to be inserted
 	newTags := make([][]string, 0, len(rows))
 	p._csi.mutex.RLock()
@@ -214,15 +221,65 @@ func (p *processor) processCSI(hypertable string, rows []*insertData) uint64 {
 		dataRows[i][1] = p._csi.m[tagKey]
 	}
 	p._csi.mutex.RUnlock()
+*/
 
-	cols := make([]string, 0, colLen)
-	cols = append(cols, "time", "tags_id", "additional_tags")
+/*
+if (len(tagRows) > 0) {
+	cols := make([]string, 0, len(tableCols["tags"]) + 1)
+	cols = append(cols, "id")
+	cols = append(cols, tableCols["tags"]...)
+
+	rows := pgx.CopyFromRows(tagRows)
+	tagTable := "tags"
+	inserted, err := p._pgxConn.CopyFrom(context.Background(), pgx.Identifier{tagTable}, cols, rows)
+
+	if err != nil {
+		panic(err)
+	}
+
+	if inserted != int64(len(dataRows)) {
+		fmt.Fprintf(os.Stderr, "Failed to insert all the data! Expected: %d, Got: %d", len(dataRows), inserted)
+		os.Exit(1)
+	}
+
+	/*
+	// insert tags
+	tx := MustBegin(p._db)
+	stmt, err := tx.Prepare(pq.CopyIn("tags", cols...))
+	if err != nil {
+		panic(err)
+	}
+
+	for _, tr := range tagRows {
+		stmt.Exec(tr...)
+	}
+	_, err = stmt.Exec()
+	if err != nil {
+		panic(err)
+	}
+
+	err = stmt.Close()
+	if err != nil {
+		panic(err)
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		panic(err)
+	}
+}
+
+*/
+
+cols := make([]string, 0, colLen)
+	cols = append(cols, "time", "tags_id")
 	if p.opts.InTableTag {
 		cols = append(cols, tableCols[tagsKey][0])
 	}
 	cols = append(cols, tableCols[hypertable]...)
 
 	if p.opts.ForceTextFormat {
+		// insert data
 		tx := MustBegin(p._db)
 		stmt, err := tx.Prepare(pq.CopyIn(hypertable, cols...))
 		if err != nil {
@@ -246,7 +303,39 @@ func (p *processor) processCSI(hypertable string, rows []*insertData) uint64 {
 		if err != nil {
 			panic(err)
 		}
-	} else {
+		/*
+		if (len(tagRows) > 0) {
+			cols = make([]string, 0, len(tableCols["tags"]) + 1)
+			cols = append(cols, "id")
+			cols = append(cols, tableCols["tags"]...)
+				// insert tags
+			tx = MustBegin(p._db)
+			stmt, err = tx.Prepare(pq.CopyIn("tags", cols...))
+			if err != nil {
+				panic(err)
+			}
+
+			for _, tr := range tagRows {
+				stmt.Exec(tr...)
+			}
+			_, err = stmt.Exec()
+			if err != nil {
+				panic(err)
+			}
+
+			err = stmt.Close()
+			if err != nil {
+				panic(err)
+			}
+
+			err = tx.Commit()
+			if err != nil {
+				panic(err)
+			}
+		}
+		*/
+
+		} else {
 		if !p.opts.UseInsert {
 			rows := pgx.CopyFromRows(dataRows)
 			inserted, err := p._pgxConn.CopyFrom(context.Background(), pgx.Identifier{hypertable}, cols, rows)
