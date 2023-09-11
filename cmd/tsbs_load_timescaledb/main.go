@@ -42,6 +42,7 @@ func initProgramOptions() (*timescaledb.LoadingOptions, load.BenchmarkRunner, *l
 	opts.ConnDB = viper.GetString("admin-db-name")
 	opts.LogBatches = viper.GetBool("log-batches")
 
+	opts.Primary = viper.GetBool("is-primary")
 	opts.UseHypertable = viper.GetBool("use-hypertable")
 	opts.ChunkTime = viper.GetDuration("chunk-time")
 

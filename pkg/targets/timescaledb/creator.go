@@ -68,13 +68,13 @@ func (d *dbCreator) DBExists(dbName string) bool {
 func (d *dbCreator) RemoveOldDB(dbName string) error {
 	db := MustConnect(d.driver, d.connStr)
 	defer db.Close()
-	MustExec(db, "DROP DATABASE IF EXISTS "+dbName)
+	// MustExec(db, "DROP DATABASE IF EXISTS "+dbName)
 	return nil
 }
 
 func (d *dbCreator) CreateDB(dbName string) error {
 	db := MustConnect(d.driver, d.connStr)
-	MustExec(db, "CREATE DATABASE "+dbName)
+	// MustExec(db, "CREATE DATABASE "+dbName)
 	db.Close()
 	return nil
 }
@@ -166,6 +166,10 @@ func (d *dbCreator) getFieldAndIndexDefinitions(tableName string, columns []stri
 // createTableAndIndexes takes a list of field and index definitions for a given tableName and constructs
 // the necessary table, index, and potential hypertable based on the user's settings
 func (d *dbCreator) createTableAndIndexes(dbBench *sql.DB, tableName string, fieldDefs []string, indexDefs []string) {
+	if (!d.opts.Primary) {
+		fmt.Printf("not primary.\n");
+		return
+	}
 	// We default to the tags_id column unless users are creating the
 	// name/hostname column in the time-series table for multi-node
 	// testing. For distributed queries, pushdown of JOINs is not yet
@@ -178,6 +182,7 @@ func (d *dbCreator) createTableAndIndexes(dbBench *sql.DB, tableName string, fie
 
 	MustExec(dbBench, fmt.Sprintf("DROP TABLE IF EXISTS %s", tableName))
 	MustExec(dbBench, fmt.Sprintf("CREATE TABLE %s (time timestamptz, tags_id integer, %s, additional_tags JSONB DEFAULT NULL)", tableName, strings.Join(fieldDefs, ",")))
+	//MustExec(dbBench, fmt.Sprintf("SELECT create_distributed_table('%s', 'hostname');", tableName))
 	/*
 	if d.opts.PartitionIndex {
 		MustExec(dbBench, fmt.Sprintf("CREATE INDEX ON %s(%s, \"time\" DESC)", tableName, partitionColumn))

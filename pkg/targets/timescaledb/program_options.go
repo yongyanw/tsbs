@@ -16,6 +16,7 @@ type LoadingOptions struct {
 	Port            string
 	ConnDB          string `yaml:"admin-db-name" mapstructure:"admin-db-name"`
 
+	Primary 			bool `yaml:"is-primary" mapstructure:"is-primary"`
 	UseHypertable bool `yaml:"use-hypertable" mapstructure:"use-hypertable"`
 	LogBatches    bool `yaml:"log-batches" mapstructure:"log-batches"`
 	UseJSON       bool `yaml:"use-jsonb-tags" mapstructure:"use-jsonb-tags"`

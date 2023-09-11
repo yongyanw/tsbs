@@ -51,6 +51,7 @@ func (t *timescaleTarget) TargetSpecificFlags(flagPrefix string, flagSet *pflag.
 
 	flagSet.Bool(flagPrefix+"log-batches", false, "Whether to time individual batches.")
 
+	flagSet.Bool(flagPrefix+"is-primary", true, "Whether it's primary node which will create tables.")
 	flagSet.Bool(flagPrefix+"use-hypertable", true, "Whether to make the table a hypertable. Set this flag to false to check input write speed against regular PostgreSQL.")
 	flagSet.Bool(flagPrefix+"use-jsonb-tags", false, "Whether tags should be stored as JSONB (instead of a separate table with schema)")
 	flagSet.Bool(flagPrefix+"in-table-partition-tag", false, "Whether the partition key (e.g. hostname) should also be in the metrics hypertable")
